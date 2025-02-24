@@ -1,0 +1,142 @@
+#include <Arduino.h>
+
+// Pins für den L298N Motortreiber
+const int motorRechtsRuck = 6;  // IN1
+const int motorRechtsVor = 9;  // IN2
+const int motorLinksVor = 10; // IN3
+const int motorLinksRuck = 11; // IN4
+
+// IR-Sensor Pins (analoge Pins)
+const int IR_SENSOR_FRONT = A2;
+const int IR_SENSOR_LINKS = A0;
+const int IR_SENSOR_RECHTS = A5;
+
+// Schwellenwerte für Hinderniserkennung (in cm)
+const int distanceThresholdFront = 35; // Front
+const int distanceThresholdSide = 40; // Seitenregelung
+
+// Hysterese-Marge für die seitlichen Sensoren  !
+const int hysteresisMargin = 10; // Marge in cm für Seitensensoren
+
+// Parameter für die Abstandskalkulation
+const float mFront = 16256; // Frontsensor
+const float kFront = 18;    
+
+const float mSide = 8670; // Seitensensoren (angepasst für max. 80 cm)
+const float kSide = 10;
+
+const int buttonLowPin = 2; // Pin für Button, der auf LOW setzt
+const int buttonHighPin = 3; // Pin für Button, der auf HIGH setzt
+
+void setup() {
+    // Motor-Pins als Ausgang definieren
+    pinMode(motorRechtsRuck, OUTPUT);
+    pinMode(motorRechtsVor, OUTPUT);
+    pinMode(motorLinksVor, OUTPUT);
+    pinMode(motorLinksRuck, OUTPUT);
+
+    Serial.begin(9600);
+    Serial.println("System gestartet...");
+
+    pinMode(buttonLowPin, INPUT_PULLUP); // Button als Eingang mit Pullup-Widerstand
+    pinMode(buttonHighPin, INPUT_PULLUP);
+}
+
+void loop() {
+    // Sensorwerte lesen
+    int rawFront = analogRead(IR_SENSOR_FRONT);
+    int rawLeft = analogRead(IR_SENSOR_LINKS);
+    int rawRight = analogRead(IR_SENSOR_RECHTS);
+
+    // Abstände berechnen
+    float distanceFront = mFront / (rawFront + kFront) - 8;
+    float distanceLeft = mSide / (rawLeft + kSide) - 5;
+    float distanceRight = mSide / (rawRight + kSide) - 5;
+
+    // Begrenzung der Werte
+    distanceFront = constrain(distanceFront, 20, 150); // Front: 20 bis 150 cm
+    distanceLeft = constrain(distanceLeft, 10, 80);    // Seiten: 10 bis 80 cm
+    distanceRight = constrain(distanceRight, 10, 80);
+
+    // Steuerlogik
+    int speed = 190; // Geschwindigkeit (0 bis 255)
+    int turnspeed = 80; // Geschwindigkeit Drehung
+
+    if (distanceFront <= distanceThresholdFront) {
+        // Stoppen, wenn Hindernis vorne erkannt
+        analogWrite(motorRechtsRuck, speed);
+        analogWrite(motorRechtsVor, 0); // rechts v
+        analogWrite(motorLinksVor, 0); // links v
+        analogWrite(motorLinksRuck, speed);
+       // Serial.println("Hindernis vorne erkannt! Motoren gestoppt.");
+    } 
+     if (distanceLeft <= distanceThresholdSide + hysteresisMargin) {
+        // Hindernis links erkannt und Hysterese-Marge, nach rechts ausweichen
+        analogWrite(motorRechtsRuck, 0);
+        analogWrite(motorRechtsVor, speed);
+        analogWrite(motorLinksVor, turnspeed);
+        analogWrite(motorLinksRuck, 0);
+       // Serial.println("Hindernis links erkannt! Nach rechts ausweichen.");
+    } 
+    else if (distanceRight <= distanceThresholdSide + hysteresisMargin) {
+        // Hindernis rechts erkannt und Hysterese-Marge, nach links ausweichen
+        analogWrite(motorRechtsRuck, 0);
+        analogWrite(motorRechtsVor, turnspeed);
+        analogWrite(motorLinksVor, speed);
+        analogWrite(motorLinksRuck, 0);
+        // Serial.println("Hindernis rechts erkannt! Nach links ausweichen.");
+    } 
+    // Wenn die Seite links und rechts deutlich abweichen
+    else if (distanceRight > distanceLeft) {
+        // Wenn der Abstand rechts viel größer ist, fährt das Fahrzeug nach links
+        analogWrite(motorRechtsRuck, 0);
+        analogWrite(motorRechtsVor, speed);
+        analogWrite(motorLinksVor, 0);
+        analogWrite(motorLinksRuck, 0);
+        // Serial.println("Auto dreht nach links.");
+    } 
+    else if (distanceLeft > distanceRight) {
+        // Wenn der Abstand links viel größer ist, fährt das Fahrzeug nach rechts
+        analogWrite(motorRechtsRuck, 0);
+        analogWrite(motorRechtsVor, 0);
+        analogWrite(motorLinksVor, speed);
+        analogWrite(motorLinksRuck, 0);
+        // Serial.println("Auto dreht nach rechts.");
+    } 
+    else {
+        // Keine Hindernisse, vorwärts fahren
+        analogWrite(motorRechtsRuck, 0);
+        analogWrite(motorRechtsVor, speed);
+        analogWrite(motorLinksVor, speed);
+        analogWrite(motorLinksRuck, 0);
+        // Serial.println("Fahrzeug fährt vorwärts.");
+    }
+
+    if (digitalRead(buttonLowPin) == LOW) {
+        // Stoppen wenn der Button für LOW gedrückt ist
+        digitalWrite(motorRechtsRuck, LOW);
+        digitalWrite(motorRechtsVor, LOW);
+        digitalWrite(motorLinksVor, LOW);
+        digitalWrite(motorLinksRuck, LOW);
+    }
+
+    // Prüfen, ob der Button für HIGH gedrückt ist
+    if (digitalRead(buttonHighPin) == LOW) {
+        digitalWrite(motorRechtsRuck, LOW);
+        digitalWrite(motorRechtsVor, HIGH);
+        digitalWrite(motorLinksVor, HIGH);
+        digitalWrite(motorLinksRuck, LOW);
+    }
+    
+    // Debug-Ausgabe
+    Serial.print("Front: \t");
+    Serial.print(distanceFront);
+    Serial.print(" cm, Links: ");
+    Serial.print(distanceLeft);
+    Serial.print(" cm, Rechts: ");
+    Serial.print(distanceRight);
+
+    Serial.println(" cm");
+
+    delay(50); // Wartezeit für Stabilität
+}
